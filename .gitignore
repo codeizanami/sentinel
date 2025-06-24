@@ -1,0 +1,28 @@
+# Archivos y carpetas de Node.js
+node_modules/
+.env
+
+# Archivos de configuración de bot que no deben ser versionados
+config.json
+package.json
+package-lock.json
+# Archivos de log
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Directorios de compilación/caché
+dist/
+build/
+.cache/
+
+# Entornos de desarrollo/IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
