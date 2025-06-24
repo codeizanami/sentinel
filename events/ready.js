@@ -1,7 +1,7 @@
 const { Events, REST, Routes, ActivityType } = require('discord.js'); // Asegúrate de importar ActivityType
 
 // ¡Importante! Reemplaza esto con el ID de tu aplicación de bot (Application ID)
-const CLIENT_ID = '1386689579452731545'; // Ejemplo: '1234567890123456789'
+const CLIENT_ID = ''; // Ejemplo: '1234567890123456789'
 module.exports = {
     name: Events.ClientReady,
     once: true,
