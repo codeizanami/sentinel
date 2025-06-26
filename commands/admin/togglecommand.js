@@ -43,7 +43,7 @@ module.exports = {
         // Mensaje de confirmación
         const statusText = newState ? 'habilitado' : 'deshabilitado';
         await interaction.editReply({
-            content: `✅ El comando \`${commandName}\` ha sido marcado como **${statusText}** para este servidor. (Recuerda que esto requiere una base de datos y un manejo avanzado en tu bot).`,
+            content: `✅ El comando \`${commandName}\` ha sido marcado como **${statusText}** para este servidor. (Comando Deshabilitado).`,
             flags: [MessageFlags.Ephemeral]
         });
 

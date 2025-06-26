@@ -1,3 +1,4 @@
+// index.js
 // Carga las variables de entorno desde .env
 require('dotenv').config();
 
@@ -7,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // Importa el gestor de configuración.
-const configManager = require('./utils/configManager'); 
+const configManager = require('./utils/configManager');
 
 // Crea una nueva instancia del cliente de Discord con los intents necesarios
 const client = new Client({
@@ -23,7 +24,9 @@ const client = new Client({
 // Inicializa una Collection para almacenar los comandos del bot
 client.commands = new Collection();
 // Inicializa un Map para almacenar mensajes borrados/editados para el comando /snipe
-client.snipedMessages = new Map(); 
+client.snipedMessages = new Map();
+// NUEVO: Inicializar un Map para almacenar el estado temporal de la configuración de tickets
+client.ticketSetupState = new Map();
 
 // --- ASIGNAR TODAS LAS FUNCIONES DE CONFIGMANAGER AL CLIENTE ---
 client.getGuildConfig = configManager.getGuildConfig;
@@ -31,9 +34,13 @@ client.setGuildConfig = configManager.setGuildConfig;
 client.getActivePolls = configManager.getActivePolls;
 client.addOrUpdateActivePoll = configManager.addOrUpdateActivePoll;
 client.removeActivePoll = configManager.removeActivePoll;
-// ¡NUEVO! Asignar las funciones para la gestión de comandos
+// Asignar las funciones para la gestión de comandos
 client.getCommandEnabledStatus = configManager.getCommandEnabledStatus;
 client.toggleCommandStatus = configManager.toggleCommandStatus;
+// NUEVO: Asignar las funciones para la gestión de tickets
+client.getTicketSettings = configManager.getTicketSettings;
+client.setTicketSetting = configManager.setTicketSetting;
+client.incrementTicketCounter = configManager.incrementTicketCounter;
 
 
 // --- Carga Dinámica de Comandos ---
@@ -72,7 +79,7 @@ for (const file of eventFiles) {
 client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('Error al iniciar sesión con el bot:', error);
     console.error('Asegúrate de que tu token de Discord sea correcto y esté en el archivo .env.');
-    console.error('También verifica que hayas activado el "MESSAGE CONTENT INTENT" en el portal de desarrolladores de Discord.');
+    console.error('También verifica que hayas activado el \"MESSAGE CONTENT INTENT\" en el portal de desarrolladores de Discord.');
 });
 
 // Evento que se dispara una vez que el bot ha iniciado sesión y está listo

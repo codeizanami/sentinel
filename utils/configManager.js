@@ -1,3 +1,4 @@
+// utils/configManager.js
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -13,7 +14,18 @@ function loadConfig() {
             const configFile = fs.readFileSync(configPath, 'utf8');
             config = JSON.parse(configFile);
             // Asegurarse de que las secciones necesarias existan si el archivo ya existía pero no las tenía
-            if (!config.defaultSettings) config.defaultSettings = { "logChannelId": null, "unverifiedRoleId": null, "verifiedRoleId": null };
+            if (!config.defaultSettings) config.defaultSettings = {
+                "logChannelId": null,
+                "unverifiedRoleId": null,
+                "verifiedRoleId": null,
+                // NUEVO: Valores predeterminados para tickets
+                "ticketCategoryId": null,
+                "supportRoleIds": [], // CAMBIO: Ahora es un array para múltiples roles
+                "ticketLogChannelId": null,
+                "ticketCounter": 0, // Contador de tickets global o por defecto
+                "ticketPanelChannelId": null, // NUEVO: Canal donde se envía el panel de tickets
+                "ticketPanelMessageId": null // NUEVO: ID del mensaje del panel de tickets
+            };
             if (!config.guildSettings) config.guildSettings = {};
             if (!config.activePolls) config.activePolls = {};
             // NOTA: La sección de warnings no se inicializa aquí porque ya la tienes implementada.
@@ -24,7 +36,14 @@ function loadConfig() {
                 "defaultSettings": {
                     "logChannelId": null,
                     "unverifiedRoleId": null,
-                    "verifiedRoleId": null
+                    "verifiedRoleId": null,
+                    // NUEVO: Valores predeterminados para tickets
+                    "ticketCategoryId": null,
+                    "supportRoleIds": [], // CAMBIO: Ahora es un array
+                    "ticketLogChannelId": null,
+                    "ticketCounter": 0,
+                    "ticketPanelChannelId": null, // NUEVO
+                    "ticketPanelMessageId": null // NUEVO
                 },
                 "guildSettings": {},
                 "activePolls": {}
@@ -40,7 +59,14 @@ function loadConfig() {
             "defaultSettings": {
                 "logChannelId": null,
                 "unverifiedRoleId": null,
-                "verifiedRoleId": null
+                "verifiedRoleId": null,
+                // NUEVO: Valores predeterminados para tickets
+                "ticketCategoryId": null,
+                "supportRoleIds": [], // CAMBIO: Ahora es un array
+                "ticketLogChannelId": null,
+                "ticketCounter": 0,
+                "ticketPanelChannelId": null, // NUEVO
+                "ticketPanelMessageId": null // NUEVO
             },
             "guildSettings": {},
             "activePolls": {}
@@ -75,9 +101,20 @@ function getGuildConfig(guildId) {
     if (!config.guildSettings[guildId].disabledCommands) {
         config.guildSettings[guildId].disabledCommands = [];
     }
+    // Asegura que las ticketSettings estén inicializadas para el gremio si no existen
+    // (Ahora se inicializan en defaultSettings al cargar el config principal,
+    // pero mantenemos esto por si acaso una configuración existente no las tiene)
+    if (!config.guildSettings[guildId].ticketCategoryId) config.guildSettings[guildId].ticketCategoryId = null;
+    if (!config.guildSettings[guildId].supportRoleIds) config.guildSettings[guildId].supportRoleIds = [];
+    if (!config.guildSettings[guildId].ticketLogChannelId) config.guildSettings[guildId].ticketLogChannelId = null;
+    if (!config.guildSettings[guildId].ticketCounter) config.guildSettings[guildId].ticketCounter = 0;
+    if (!config.guildSettings[guildId].ticketPanelChannelId) config.guildSettings[guildId].ticketPanelChannelId = null;
+    if (!config.guildSettings[guildId].ticketPanelMessageId) config.guildSettings[guildId].ticketPanelMessageId = null;
+
 
     const guildSpecificSettings = config.guildSettings[guildId] || {};
-    return { ...config.defaultSettings, ...guildSpecificSettings }; // Combina default con específicos
+    // Combina default con específicos, priorizando los específicos del gremio
+    return { ...config.defaultSettings, ...guildSpecificSettings };
 }
 
 /**
@@ -94,6 +131,44 @@ function setGuildConfig(guildId, settings) {
 }
 
 /**
+ * Obtiene el valor de una configuración específica de ticket para un Gremio.
+ * @param {string} guildId El ID del Gremio.
+ * @param {string} key La clave de la configuración (ej. 'ticketCategoryId').
+ * @returns {*} El valor de la configuración.
+ */
+function getTicketSettings(guildId, key) {
+    const guildSettings = getGuildConfig(guildId); // Obtiene la configuración completa del gremio
+    return guildSettings[key]; // Accede directamente a la clave de ticket, ya que getGuildConfig las fusiona
+}
+
+/**
+ * Establece un valor para una configuración específica de ticket para un Gremio.
+ * @param {string} guildId El ID del Gremio.
+ * @param {string} key La clave de la configuración (ej. 'ticketCategoryId').
+ * @param {*} value El valor a establecer.
+ */
+function setTicketSetting(guildId, key, value) {
+    if (!config.guildSettings[guildId]) {
+        config.guildSettings[guildId] = {};
+    }
+    // Asigna el valor directamente a la configuración del gremio
+    config.guildSettings[guildId][key] = value;
+    saveConfig();
+}
+
+/**
+ * Incrementa el contador de tickets para un Gremio específico.
+ * @param {string} guildId El ID del Gremio.
+ * @returns {number} El nuevo valor del contador de tickets.
+ */
+function incrementTicketCounter(guildId) {
+    const currentCounter = getTicketSettings(guildId, 'ticketCounter') || 0;
+    const newCounter = currentCounter + 1;
+    setTicketSetting(guildId, 'ticketCounter', newCounter);
+    return newCounter;
+}
+
+/**
  * Obtiene todas las encuestas activas.
  * @returns {object} Un objeto con las encuestas activas.
  */
@@ -103,7 +178,7 @@ function getActivePolls() {
 
 /**
  * Añade o actualiza una encuesta activa.
- * @param {string} pollMessageId El ID del mensaje de la encuesta (como clave).\
+ * @param {string} pollMessageId El ID del mensaje de la encuesta (como clave).
  * @param {object} pollData Los datos de la encuesta.
  */
 function addOrUpdateActivePoll(pollMessageId, pollData) {
@@ -121,7 +196,7 @@ function removeActivePoll(pollMessageId) {
 }
 
 /**
- * Obtiene el estado de un comando para un Gremio.
+ * Obtiene el estado de habilitación de un comando para un Gremio.
  * @param {string} guildId El ID del Gremio.
  * @param {string} commandName El nombre del comando.
  * @returns {boolean} True si el comando está habilitado, false si está deshabilitado.
@@ -146,7 +221,7 @@ function toggleCommandStatus(guildId, commandName, enable) {
     } else {
         disabledCommands.add(commandName); // Añade a la lista de deshabilitados
     }
-    
+
     // Asegurarse de que el objeto guildSettings en config.guildSettings[guildId] se actualice
     // No solo la copia local devuelta por getGuildConfig
     if (!config.guildSettings[guildId]) {
@@ -154,6 +229,20 @@ function toggleCommandStatus(guildId, commandName, enable) {
     }
     config.guildSettings[guildId].disabledCommands = Array.from(disabledCommands);
     saveConfig();
+}
+
+/**
+ * Elimina toda la configuración específica de un Gremio, volviendo a los valores predeterminados.
+ * @param {string} guildId El ID del Gremio.
+ */
+function clearGuildConfig(guildId) {
+    if (config.guildSettings[guildId]) {
+        delete config.guildSettings[guildId];
+        saveConfig();
+        console.log(`[CONFIG] Configuración del gremio ${guildId} eliminada. Ahora usa la configuración predeterminada.`);
+    } else {
+        console.log(`[CONFIG] No hay configuración específica para el gremio ${guildId}.`);
+    }
 }
 
 
@@ -165,9 +254,13 @@ module.exports = {
     saveConfig,
     getGuildConfig,
     setGuildConfig,
+    getTicketSettings,
+    setTicketSetting,
+    incrementTicketCounter,
     getActivePolls,
     addOrUpdateActivePoll,
     removeActivePoll,
-    getCommandEnabledStatus, // ¡NUEVO!
-    toggleCommandStatus     // ¡NUEVO!
+    getCommandEnabledStatus,
+    toggleCommandStatus,
+    clearGuildConfig, // ¡Añadido el comando clearGuildConfig aquí!
 };
