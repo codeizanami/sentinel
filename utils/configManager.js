@@ -88,39 +88,19 @@ function saveConfig() {
 }
 
 /**
- * Obtiene la configuración para un Gremio (Guild) específico.
- * Fusiona las configuraciones predeterminadas con las del Gremio si existen.
+ * Obtiene la configuración específica de un gremio, o los valores predeterminados si no hay una configuración específica.
  * @param {string} guildId El ID del Gremio.
- * @returns {object} La configuración del Gremio.
+ * @returns {object} La configuración del gremio.
  */
 function getGuildConfig(guildId) {
-    // Asegura que las disabledCommands estén inicializadas para el gremio si no existen
-    if (!config.guildSettings[guildId]) {
-        config.guildSettings[guildId] = {};
-    }
-    if (!config.guildSettings[guildId].disabledCommands) {
-        config.guildSettings[guildId].disabledCommands = [];
-    }
-    // Asegura que las ticketSettings estén inicializadas para el gremio si no existen
-    // (Ahora se inicializan en defaultSettings al cargar el config principal,
-    // pero mantenemos esto por si acaso una configuración existente no las tiene)
-    if (!config.guildSettings[guildId].ticketCategoryId) config.guildSettings[guildId].ticketCategoryId = null;
-    if (!config.guildSettings[guildId].supportRoleIds) config.guildSettings[guildId].supportRoleIds = [];
-    if (!config.guildSettings[guildId].ticketLogChannelId) config.guildSettings[guildId].ticketLogChannelId = null;
-    if (!config.guildSettings[guildId].ticketCounter) config.guildSettings[guildId].ticketCounter = 0;
-    if (!config.guildSettings[guildId].ticketPanelChannelId) config.guildSettings[guildId].ticketPanelChannelId = null;
-    if (!config.guildSettings[guildId].ticketPanelMessageId) config.guildSettings[guildId].ticketPanelMessageId = null;
-
-
-    const guildSpecificSettings = config.guildSettings[guildId] || {};
-    // Combina default con específicos, priorizando los específicos del gremio
-    return { ...config.defaultSettings, ...guildSpecificSettings };
+    const guildSpecificConfig = config.guildSettings[guildId] || {};
+    return { ...config.defaultSettings, ...guildSpecificConfig };
 }
 
 /**
- * Establece una configuración específica para un Gremio.
+ * Establece o actualiza la configuración específica de un gremio.
  * @param {string} guildId El ID del Gremio.
- * @param {object} settings Un objeto con las configuraciones a establecer (ej. { logChannelId: 'ID_DEL_CANAL' }).
+ * @param {object} settings Un objeto con las propiedades de configuración a establecer o actualizar.
  */
 function setGuildConfig(guildId, settings) {
     if (!config.guildSettings[guildId]) {
@@ -130,106 +110,48 @@ function setGuildConfig(guildId, settings) {
     saveConfig();
 }
 
-/**
- * Obtiene el valor de una configuración específica de ticket para un Gremio.
- * @param {string} guildId El ID del Gremio.
- * @param {string} key La clave de la configuración (ej. 'ticketCategoryId').
- * @returns {*} El valor de la configuración.
- */
-function getTicketSettings(guildId, key) {
-    const guildSettings = getGuildConfig(guildId); // Obtiene la configuración completa del gremio
-    return guildSettings[key]; // Accede directamente a la clave de ticket, ya que getGuildConfig las fusiona
+// Funciones para gestionar la configuración de tickets (ya existentes)
+function getTicketSettings(guildId) {
+    const guildConfig = getGuildConfig(guildId);
+    return {
+        ticketCategoryId: guildConfig.ticketCategoryId,
+        supportRoleIds: guildConfig.supportRoleIds,
+        ticketLogChannelId: guildConfig.ticketLogChannelId,
+        ticketCounter: guildConfig.ticketCounter,
+        ticketPanelChannelId: guildConfig.ticketPanelChannelId,
+        ticketPanelMessageId: guildConfig.ticketPanelMessageId
+    };
 }
 
-/**
- * Establece un valor para una configuración específica de ticket para un Gremio.
- * @param {string} guildId El ID del Gremio.
- * @param {string} key La clave de la configuración (ej. 'ticketCategoryId').
- * @param {*} value El valor a establecer.
- */
 function setTicketSetting(guildId, key, value) {
-    if (!config.guildSettings[guildId]) {
-        config.guildSettings[guildId] = {};
-    }
-    // Asigna el valor directamente a la configuración del gremio
-    config.guildSettings[guildId][key] = value;
-    saveConfig();
+    const guildConfig = getGuildConfig(guildId);
+    guildConfig[key] = value;
+    setGuildConfig(guildId, { [key]: value });
 }
 
-/**
- * Incrementa el contador de tickets para un Gremio específico.
- * @param {string} guildId El ID del Gremio.
- * @returns {number} El nuevo valor del contador de tickets.
- */
 function incrementTicketCounter(guildId) {
-    const currentCounter = getTicketSettings(guildId, 'ticketCounter') || 0;
-    const newCounter = currentCounter + 1;
+    const guildConfig = getGuildConfig(guildId);
+    const newCounter = (guildConfig.ticketCounter || 0) + 1;
     setTicketSetting(guildId, 'ticketCounter', newCounter);
     return newCounter;
 }
 
-/**
- * Obtiene todas las encuestas activas.
- * @returns {object} Un objeto con las encuestas activas.
- */
+// Funciones para gestionar encuestas activas (ya existentes)
 function getActivePolls() {
     return config.activePolls;
 }
 
-/**
- * Añade o actualiza una encuesta activa.
- * @param {string} pollMessageId El ID del mensaje de la encuesta (como clave).
- * @param {object} pollData Los datos de la encuesta.
- */
-function addOrUpdateActivePoll(pollMessageId, pollData) {
-    config.activePolls[pollMessageId] = pollData;
+function addOrUpdateActivePoll(messageId, pollData) {
+    config.activePolls[messageId] = pollData;
     saveConfig();
 }
 
-/**
- * Elimina una encuesta de las encuestas activas.
- * @param {string} pollMessageId El ID del mensaje de la encuesta.
- */
-function removeActivePoll(pollMessageId) {
-    delete config.activePolls[pollMessageId];
+function removeActivePoll(messageId) {
+    delete config.activePolls[messageId];
     saveConfig();
 }
 
-/**
- * Obtiene el estado de habilitación de un comando para un Gremio.
- * @param {string} guildId El ID del Gremio.
- * @param {string} commandName El nombre del comando.
- * @returns {boolean} True si el comando está habilitado, false si está deshabilitado.
- */
-function getCommandEnabledStatus(guildId, commandName) {
-    const guildSettings = getGuildConfig(guildId); // Esto ya incluye disabledCommands
-    return !guildSettings.disabledCommands.includes(commandName);
-}
-
-/**
- * Habilita o deshabilita un comando para un Gremio.
- * @param {string} guildId El ID del Gremio.
- * @param {string} commandName El nombre del comando.
- * @param {boolean} enable True para habilitar, false para deshabilitar.
- */
-function toggleCommandStatus(guildId, commandName, enable) {
-    const guildSettings = getGuildConfig(guildId);
-    const disabledCommands = new Set(guildSettings.disabledCommands);
-
-    if (enable) {
-        disabledCommands.delete(commandName); // Elimina de la lista de deshabilitados
-    } else {
-        disabledCommands.add(commandName); // Añade a la lista de deshabilitados
-    }
-
-    // Asegurarse de que el objeto guildSettings en config.guildSettings[guildId] se actualice
-    // No solo la copia local devuelta por getGuildConfig
-    if (!config.guildSettings[guildId]) {
-        config.guildSettings[guildId] = {};
-    }
-    config.guildSettings[guildId].disabledCommands = Array.from(disabledCommands);
-    saveConfig();
-}
+// Las funciones getCommandEnabledStatus y toggleCommandStatus han sido eliminadas.
 
 /**
  * Elimina toda la configuración específica de un Gremio, volviendo a los valores predeterminados.
@@ -260,7 +182,5 @@ module.exports = {
     getActivePolls,
     addOrUpdateActivePoll,
     removeActivePoll,
-    getCommandEnabledStatus,
-    toggleCommandStatus,
-    clearGuildConfig, // ¡Añadido el comando clearGuildConfig aquí!
+    clearGuildConfig,
 };

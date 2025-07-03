@@ -34,14 +34,7 @@ client.setGuildConfig = configManager.setGuildConfig;
 client.getActivePolls = configManager.getActivePolls;
 client.addOrUpdateActivePoll = configManager.addOrUpdateActivePoll;
 client.removeActivePoll = configManager.removeActivePoll;
-// Asignar las funciones para la gestión de comandos
-client.getCommandEnabledStatus = configManager.getCommandEnabledStatus;
-client.toggleCommandStatus = configManager.toggleCommandStatus;
-// NUEVO: Asignar las funciones para la gestión de tickets
-client.getTicketSettings = configManager.getTicketSettings;
-client.setTicketSetting = configManager.setTicketSetting;
-client.incrementTicketCounter = configManager.incrementTicketCounter;
-
+// Las funciones getCommandEnabledStatus y toggleCommandStatus han sido eliminadas.
 
 // --- Carga Dinámica de Comandos ---
 const foldersPath = path.join(__dirname, 'commands');
@@ -56,7 +49,7 @@ for (const folder of commandFolders) {
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
         } else {
-            console.warn(`[ADVERTENCIA] El comando en ${filePath} no tiene las propiedades "data" o "execute" requeridas.`);
+            console.log(`[ADVERTENCIA] El comando en ${filePath} le falta una propiedad "data" o "execute" requerida.`);
         }
     }
 }
@@ -79,7 +72,7 @@ for (const file of eventFiles) {
 client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('Error al iniciar sesión con el bot:', error);
     console.error('Asegúrate de que tu token de Discord sea correcto y esté en el archivo .env.');
-    console.error('También verifica que hayas activado el \"MESSAGE CONTENT INTENT\" en el portal de desarrolladores de Discord.');
+    console.error('También verifica que hayas activado el "MESSAGE CONTENT INTENT" en el portal de desarrolladores de Discord.');
 });
 
 // Evento que se dispara una vez que el bot ha iniciado sesión y está listo
@@ -98,6 +91,6 @@ client.once(Events.ClientReady, async c => {
         await c.application.commands.set(commandsToRegister);
         console.log('Comandos de barra registrados globalmente con Discord.');
     } catch (error) {
-        console.error('Error al registrar comandos de barra globalmente:', error);
+        console.error('Error al registrar comandos globalmente:', error);
     }
 });

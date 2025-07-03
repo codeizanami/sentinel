@@ -2,7 +2,7 @@
 const { Events, EmbedBuilder, PermissionsBitField, MessageFlags, ActionRowBuilder, ChannelSelectMenuBuilder, StringSelectMenuBuilder, RoleSelectMenuBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
 const { logModerationAction } = require('../utils/logger');
 // ¡IMPORTANTE! Asegúrate de que estas funciones estén importadas correctamente
-const { getActivePolls, addOrUpdateActivePoll, removeActivePoll, getCommandEnabledStatus, getTicketSettings, setTicketSetting, incrementTicketCounter, getGuildConfig } = require('../utils/configManager'); // Asegúrate de importar las funciones de ticket y getGuildConfig
+const { getActivePolls, addOrUpdateActivePoll, removeActivePoll, getTicketSettings, setTicketSetting, incrementTicketCounter, getGuildConfig } = require('../utils/configManager'); // Asegúrate de importar las funciones de ticket y getGuildConfig
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -16,16 +16,7 @@ module.exports = {
                 return interaction.reply({ content: '❌ Este comando no existe o no está registrado.', flags: [MessageFlags.Ephemeral] });
             }
 
-            // Verificar si el comando está deshabilitado para este gremio
-            if (interaction.guildId) {
-                const isCommandEnabled = interaction.client.getCommandEnabledStatus(interaction.guild.id, interaction.commandName);
-                if (!isCommandEnabled) {
-                    return interaction.reply({
-                        content: `❌ El comando \`${interaction.commandName}\` está actualmente deshabilitado en este servidor.`,
-                        flags: [MessageFlags.Ephemeral]
-                    });
-                }
-            }
+            // La verificación de si el comando está deshabilitado para este gremio ha sido eliminada.
 
             try {
                 await command.execute(interaction, interaction.client);
@@ -142,11 +133,11 @@ module.exports = {
 
                 await interaction.update({
                     content: `⚙️ **Configuración del Sistema de Tickets - Resumen:**\n\n` +
-                             `**Categoría de Tickets:** ${category ? category.name : 'No encontrada'}\n` +
-                             `**Roles de Soporte:** ${supportRoles || 'Ninguno seleccionado'}\n` + // Muestra múltiples roles
-                             `**Canal de Logs:** ${logChannel ? logChannel.name : 'No encontrado'}\n` +
-                             `**Canal del Panel de Tickets:** ${panelChannel ? panelChannel.name : 'No encontrado'}\n\n` +
-                             `¿Es esta configuración correcta?`,
+                        `**Categoría de Tickets:** ${category ? category.name : 'No encontrada'}\n` +
+                        `**Roles de Soporte:** ${supportRoles || 'Ninguno seleccionado'}\n` + // Muestra múltiples roles
+                        `**Canal de Logs:** ${logChannel ? logChannel.name : 'No encontrado'}\n` +
+                        `**Canal del Panel de Tickets:** ${panelChannel ? panelChannel.name : 'No encontrado'}\n\n` +
+                        `¿Es esta configuración correcta?`,
                     components: [row],
                     ephemeral: true
                 });
@@ -165,398 +156,302 @@ module.exports = {
                 if (!setupState || setupState.step !== 5) {
                     return interaction.reply({ content: '❌ Error en el proceso de configuración. Por favor, inicia `/ticketsetup` de nuevo.', ephemeral: true });
                 }
+                // Guardar la configuración final en configManager
+                try {
+                    await client.setGuildConfig(interaction.guild.id, setupState.data);
 
-                const { ticketCategoryId, supportRoleIds, ticketLogChannelId, ticketPanelChannelId } = setupState.data;
+                    // Enviar el panel de tickets al canal seleccionado
+                    const panelChannel = interaction.guild.channels.cache.get(setupState.data.ticketPanelChannelId);
+                    if (panelChannel) {
+                        const ticketEmbed = new EmbedBuilder()
+                            .setColor('#7289da')
+                            .setTitle('Centro de Soporte')
+                            .setDescription('Haz clic en el botón de abajo para abrir un nuevo ticket.')
+                            .setFooter({ text: 'Sentinel Bot' })
+                            .setTimestamp();
 
-                // Guardar la configuración en configManager
-                client.setTicketSetting(interaction.guild.id, 'ticketCategoryId', ticketCategoryId);
-                client.setTicketSetting(interaction.guild.id, 'supportRoleIds', supportRoleIds); // CAMBIO: Guarda el array
-                client.setTicketSetting(interaction.guild.id, 'ticketLogChannelId', ticketLogChannelId);
-                client.setTicketSetting(interaction.guild.id, 'ticketCounter', 0); // Inicializar el contador de tickets
-                client.setTicketSetting(interaction.guild.id, 'ticketPanelChannelId', ticketPanelChannelId);
+                        const ticketButton = new ButtonBuilder()
+                            .setCustomId('open_ticket')
+                            .setLabel('Abrir Ticket')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('🎫');
 
-                client.ticketSetupState.delete(userId); // Limpiar el estado temporal
+                        const row = new ActionRowBuilder().addComponents(ticketButton);
 
-                await interaction.update({
-                    content: '✅ ¡Sistema de tickets configurado exitosamente! Ahora creando el panel de tickets...',
-                    components: [], // Eliminar botones
-                    ephemeral: true
-                });
-
-                // --- CREAR EL PANEL DE TICKETS ---
-                const panelChannel = interaction.guild.channels.cache.get(ticketPanelChannelId);
-                if (panelChannel) {
-                    const ticketPanelEmbed = new EmbedBuilder()
-                        .setColor('Blue')
-                        .setTitle('📊 Sistema de Tickets de Soporte')
-                        .setDescription('Haz clic en el botón de abajo para abrir un nuevo ticket de soporte. Un miembro del equipo te atenderá pronto.')
-                        .setFooter({ text: 'Sentinel - Sistema de Tickets' })
-                        .setTimestamp();
-
-                    const openTicketButton = new ButtonBuilder()
-                        .setCustomId('open_ticket_button')
-                        .setLabel('Abrir Nuevo Ticket')
-                        .setStyle(ButtonStyle.Primary)
-                        .setEmoji('🎫'); // Emoji de ticket
-
-                    const panelRow = new ActionRowBuilder().addComponents(openTicketButton);
-
-                    try {
-                        const panelMessage = await panelChannel.send({
-                            embeds: [ticketPanelEmbed],
-                            components: [panelRow]
-                        });
-                        client.setTicketSetting(interaction.guild.id, 'ticketPanelMessageId', panelMessage.id); // Guardar ID del mensaje del panel
-                        await interaction.followUp({
-                            content: `✅ Panel de tickets enviado con éxito a ${panelChannel}.`,
-                            ephemeral: true
-                        });
-                    } catch (error) {
-                        console.error('Error al enviar el panel de tickets:', error);
-                        await interaction.followUp({
-                            content: `❌ Hubo un error al enviar el panel de tickets a ${panelChannel}. Asegúrate de que el bot tenga permisos de "Enviar Mensajes" e "Insertar Enlaces" en ese canal.`,
-                            ephemeral: true
-                        });
+                        const message = await panelChannel.send({ embeds: [ticketEmbed], components: [row] });
+                        // Guardar el ID del mensaje del panel para futuras actualizaciones
+                        await client.setTicketSetting(interaction.guild.id, 'ticketPanelMessageId', message.id);
                     }
-                } else {
-                    await interaction.followUp({
-                        content: '⚠️ El canal del panel de tickets seleccionado no se encontró. No se pudo enviar el panel.',
+
+                    await interaction.update({
+                        content: '✅ ¡Configuración de tickets guardada y panel enviado exitosamente!',
+                        components: [], // Eliminar botones después de confirmar
                         ephemeral: true
                     });
+                    client.ticketSetupState.delete(userId); // Limpiar el estado del usuario
+                } catch (error) {
+                    console.error('Error al guardar la configuración de tickets o enviar el panel:', error);
+                    await interaction.update({ content: '❌ Hubo un error al guardar la configuración o enviar el panel de tickets.', ephemeral: true });
                 }
                 return;
             }
 
             if (interaction.customId === 'ticket_setup_cancel') {
-                const userId = interaction.user.id;
-                client.ticketSetupState.delete(userId); // Limpiar el estado temporal
+                client.ticketSetupState.delete(interaction.user.id); // Limpiar el estado del usuario
+                return interaction.update({ content: '❌ Configuración de tickets cancelada.', components: [], ephemeral: true });
+            }
 
-                await interaction.update({
-                    content: '❌ Configuración del sistema de tickets cancelada.',
-                    components: [], // Eliminar botones
-                    ephemeral: true
-                });
+            // Botón para abrir un nuevo ticket
+            if (interaction.customId === 'open_ticket') {
+                await interaction.deferReply({ ephemeral: true });
+
+                const guildConfig = client.getGuildConfig(interaction.guild.id);
+                const ticketCategoryId = guildConfig.ticketCategoryId;
+                const supportRoleIds = guildConfig.supportRoleIds;
+                const ticketLogChannelId = guildConfig.ticketLogChannelId; // Para logs si es necesario
+
+                if (!ticketCategoryId || supportRoleIds.length === 0) {
+                    return interaction.editReply({ content: '❌ El sistema de tickets no está configurado correctamente. Por favor, contacta a un administrador.', ephemeral: true });
+                }
+
+                // Generar un número de ticket único
+                const ticketNumber = await client.incrementTicketCounter(interaction.guild.id);
+                const ticketChannelName = `ticket-${ticketNumber}-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`.slice(0, 100);
+
+                // Permisos para el canal del ticket
+                const permissions = [
+                    {
+                        id: interaction.guild.id, // @everyone
+                        deny: [PermissionsBitField.Flags.ViewChannel],
+                    },
+                    {
+                        id: interaction.user.id, // Usuario que abre el ticket
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                    },
+                    // Permitir a los roles de soporte ver el canal
+                    ...supportRoleIds.map(roleId => ({
+                        id: roleId,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                    })),
+                ];
+
+                try {
+                    const ticketChannel = await interaction.guild.channels.create({
+                        name: ticketChannelName,
+                        type: ChannelType.GuildText,
+                        parent: ticketCategoryId,
+                        permissionOverwrites: permissions,
+                    });
+
+                    const ticketCreatedEmbed = new EmbedBuilder()
+                        .setColor('#00ff00')
+                        .setTitle('Ticket Abierto')
+                        .setDescription(`Hola ${interaction.user},\n\nTu ticket ha sido creado en ${ticketChannel}.\nUn miembro del equipo de soporte te atenderá en breve.`)
+                        .addFields(
+                            { name: 'Ticket ID', value: `${ticketNumber}`, inline: true },
+                            { name: 'Abierto por', value: `${interaction.user.tag}`, inline: true }
+                        )
+                        .setFooter({ text: 'Sentinel Bot' })
+                        .setTimestamp();
+
+                    // Botón para cerrar el ticket
+                    const closeButton = new ButtonBuilder()
+                        .setCustomId('close_ticket')
+                        .setLabel('Cerrar Ticket')
+                        .setStyle(ButtonStyle.Danger)
+                        .setEmoji('🔒');
+
+                    const row = new ActionRowBuilder().addComponents(closeButton);
+
+                    await ticketChannel.send({
+                        content: `Bienvenido ${interaction.user}, ${supportRoleIds.map(id => `<@&${id}>`).join(', ')}`, // Mencionar roles de soporte
+                        embeds: [ticketCreatedEmbed],
+                        components: [row]
+                    });
+
+                    await interaction.editReply({ content: `✅ Tu ticket ha sido abierto en ${ticketChannel}.`, ephemeral: true });
+
+                } catch (error) {
+                    console.error('Error al crear el canal de ticket:', error);
+                    await interaction.editReply({ content: '❌ Ocurrió un error al intentar abrir tu ticket. Por favor, inténtalo de nuevo.', ephemeral: true });
+                }
                 return;
             }
 
-            // --- NUEVO: Manejo del botón para abrir ticket desde el panel ---
-            if (interaction.customId === 'open_ticket_button') {
-                const guild = interaction.guild;
-                const member = interaction.member;
+            // Botón para cerrar el ticket
+            if (interaction.customId === 'close_ticket') {
+                await interaction.deferReply({ ephemeral: true });
 
-                const ticketCategoryId = getTicketSettings(guild.id, 'ticketCategoryId');
-                const supportRoleIds = getTicketSettings(guild.id, 'supportRoleIds'); // CAMBIO: Obtener array
-                const ticketLogChannelId = getTicketSettings(guild.id, 'ticketLogChannelId');
-                const ticketPanelChannelId = getTicketSettings(guild.id, 'ticketPanelChannelId');
-                const ticketPanelMessageId = getTicketSettings(guild.id, 'ticketPanelMessageId');
+                const guildConfig = client.getGuildConfig(interaction.guild.id);
+                const ticketLogChannelId = guildConfig.ticketLogChannelId;
+                const supportRoleIds = guildConfig.supportRoleIds;
 
-                // Validar que la configuración exista
-                if (!ticketCategoryId || !supportRoleIds || supportRoleIds.length === 0 || !ticketLogChannelId || !ticketPanelChannelId || !ticketPanelMessageId) {
-                    return interaction.reply({
-                        content: '❌ El sistema de tickets no está configurado correctamente. Por favor, pide a un administrador que lo revise con `/ticketsetup`.',
-                        ephemeral: true
-                    });
+                // Verificar si el usuario tiene permiso para cerrar (creador o rol de soporte/admin)
+                const isCreator = interaction.channel.topic && interaction.channel.topic.includes(`Creator ID: ${interaction.user.id}`);
+                const hasSupportRole = interaction.member.roles.cache.some(role => supportRoleIds.includes(role.id));
+                const isAdmin = interaction.member.permissions.has(PermissionsBitField.Flags.Administrator);
+
+                if (!isCreator && !hasSupportRole && !isAdmin) {
+                    return interaction.editReply({ content: '❌ No tienes permiso para cerrar este ticket.', ephemeral: true });
                 }
 
-                // Asegurarse de que el botón se presionó en el mensaje del panel correcto
-                if (interaction.channel.id !== ticketPanelChannelId || interaction.message.id !== ticketPanelMessageId) {
-                    return interaction.reply({ content: '❌ Este botón no es válido aquí. Usa el panel de tickets oficial.', ephemeral: true });
+                try {
+                    // Mover el canal a una categoría de "cerrados" o simplemente eliminarlo
+                    // Para simplificar, lo eliminaremos y enviaremos un log.
+                    const channelName = interaction.channel.name;
+                    const ticketIdMatch = channelName.match(/ticket-(\d+)-/);
+                    const ticketId = ticketIdMatch ? ticketIdMatch[1] : 'N/A';
+                    const ticketCreatorId = interaction.channel.topic ? interaction.channel.topic.split('Creator ID: ')[1] : 'N/A';
+                    const ticketCreator = ticketCreatorId !== 'N/A' ? await client.users.fetch(ticketCreatorId).catch(() => null) : null;
+
+                    // Fetch messages for transcription (opcional, avanzado)
+                    // const messages = await interaction.channel.messages.fetch({ limit: 100 }); // Ajusta el límite si es necesario
+                    // const transcription = messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n');
+
+                    const closeEmbed = new EmbedBuilder()
+                        .setColor('#ff0000')
+                        .setTitle('Ticket Cerrado')
+                        .setDescription(`El ticket \`${channelName}\` ha sido cerrado.`)
+                        .addFields(
+                            { name: 'ID del Ticket', value: ticketId, inline: true },
+                            { name: 'Cerrado por', value: interaction.user.tag, inline: true }
+                        )
+                        .setFooter({ text: 'Sentinel Bot' })
+                        .setTimestamp();
+
+                    if (ticketCreator) {
+                        closeEmbed.addFields({ name: 'Creado por', value: ticketCreator.tag, inline: true });
+                    }
+
+                    // Enviar log al canal de logs si está configurado
+                    if (ticketLogChannelId) {
+                        const logChannel = interaction.guild.channels.cache.get(ticketLogChannelId);
+                        if (logChannel) {
+                            await logChannel.send({ embeds: [closeEmbed] });
+                            // if (transcription) {
+                            //     // Puedes guardar la transcripción en un archivo y adjuntarlo
+                            //     // O enviarlo como un archivo de texto si es muy largo
+                            //     const attachment = new AttachmentBuilder(Buffer.from(transcription), { name: `ticket-${ticketId}-transcript.txt` });
+                            //     await logChannel.send({ files: [attachment] });
+                            // }
+                        }
+                    }
+
+                    await interaction.channel.delete(); // Eliminar el canal del ticket
+                    await interaction.followUp({ content: `✅ Ticket \`${channelName}\` cerrado con éxito.`, ephemeral: true });
+
+                } catch (error) {
+                    console.error('Error al cerrar el ticket:', error);
+                    await interaction.editReply({ content: '❌ Ocurrió un error al intentar cerrar el ticket.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Manejo de botones de encuestas (Polls)
+            if (interaction.customId.startsWith('poll_vote_')) {
+                const parts = interaction.customId.split('_');
+                const messageId = parts[2];
+                const voteIndex = parseInt(parts[3]);
+
+                const activePolls = client.getActivePolls();
+                const pollData = activePolls[messageId];
+
+                if (!pollData) {
+                    return interaction.reply({ content: '❌ Esta encuesta ya no está activa o fue eliminada.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                // Evitar que un usuario cree múltiples tickets
-                const existingTicket = guild.channels.cache.find(c =>
-                    c.parentId === ticketCategoryId && c.topic === `Ticket de ${member.id}`
-                );
-                if (existingTicket) {
-                    return interaction.reply({
-                        content: `❌ Ya tienes un ticket abierto: ${existingTicket}`,
-                        ephemeral: true
-                    });
+                // Asegurarse de que el usuario no haya votado ya
+                if (pollData.votedUsers[interaction.user.id]) {
+                    return interaction.reply({ content: '🗳️ Ya has votado en esta encuesta.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                // Registrar el voto
+                const selectedOption = pollData.options[voteIndex];
+                if (pollData.votes[selectedOption]) {
+                    pollData.votes[selectedOption]++;
+                } else {
+                    pollData.votes[selectedOption] = 1;
+                }
+                pollData.votedUsers[interaction.user.id] = true; // Marcar usuario como votado
+
+                client.addOrUpdateActivePoll(messageId, pollData); // Guardar el estado actualizado
+
+                // Actualizar el embed de la encuesta con los nuevos resultados
+                const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+                let totalVotes = 0;
+                for (const option of pollData.options) {
+                    totalVotes += pollData.votes[option] || 0;
+                }
+
+                let descriptionContent = `\`\`\`\n`;
+                for (let i = 0; i < pollData.options.length; i++) {
+                    const option = pollData.options[i];
+                    const votesCount = pollData.votes[option] || 0;
+                    const percentage = totalVotes > 0 ? ((votesCount / totalVotes) * 100).toFixed(0) : 0;
+                    const progressBarLength = Math.round(percentage / 10); // Barra de 10 caracteres
+                    const progressBar = '█'.repeat(progressBarLength) + ' '.repeat(10 - progressBarLength);
+                    descriptionContent += `${String.fromCharCode(0x2460 + i)} ${option}: [${progressBar}] ${percentage}%\n`;
+                }
+                descriptionContent += `\`\`\`\nTotal de Votos: ${totalVotes}`;
+
+                updatedEmbed.setDescription(descriptionContent);
+
+                await interaction.update({ embeds: [updatedEmbed] });
+            }
+
+            // Botón para finalizar encuesta
+            if (interaction.customId === 'poll_end') {
+                const messageId = interaction.message.id;
+                const activePolls = client.getActivePolls();
+                const pollData = activePolls[messageId];
+
+                if (!pollData) {
+                    return interaction.reply({ content: '❌ Esta encuesta ya no está activa o fue eliminada.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                // Verificar si el usuario que intenta finalizar es el creador de la encuesta o un administrador
+                if (interaction.user.id !== pollData.creatorId && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                    return interaction.reply({ content: '❌ Solo el creador de la encuesta o un administrador puede finalizarla.', flags: [MessageFlags.Ephemeral] });
                 }
 
                 await interaction.deferReply({ ephemeral: true });
 
-                try {
-                    const ticketNumber = incrementTicketCounter(guild.id);
-                    const channelName = `ticket-${ticketNumber}-${member.user.username.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase()}`;
+                client.removeActivePoll(messageId); // Eliminar la encuesta de las activas
 
-                    const permissionOverwrites = [
-                        {
-                            id: guild.id,
-                            deny: [PermissionsBitField.Flags.ViewChannel], // Nadie puede ver el canal por defecto
-                        },
-                        {
-                            id: member.id,
-                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
-                        },
-                        // Permitir a todos los roles de soporte ver y gestionar el ticket
-                        ...supportRoleIds.map(roleId => ({
-                            id: roleId,
-                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
-                        })),
-                        // Permitir que el bot vea el canal para gestionar
-                        {
-                            id: client.user.id,
-                            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels],
-                        }
-                    ];
+                const resultsEmbed = new EmbedBuilder()
+                    .setColor('#0099ff')
+                    .setTitle(`📊 Resultados de la Encuesta: "${pollData.question}"`)
+                    .setDescription('La encuesta ha finalizado.')
+                    .setTimestamp();
 
-                    const ticketChannel = await guild.channels.create({
-                        name: channelName,
-                        type: ChannelType.GuildText,
-                        parent: ticketCategoryId,
-                        topic: `Ticket de ${member.id}`, // Para identificar el ticket por usuario
-                        permissionOverwrites: permissionOverwrites,
-                    });
-
-                    const embed = new EmbedBuilder()
-                        .setColor('Green')
-                        .setTitle(`Ticket #${ticketNumber} - ${member.user.tag}`)
-                        .setDescription(`Un miembro del equipo de soporte te atenderá pronto.\n\nPara cerrar este ticket, usa el botón o el comando \`/ticket cerrar\`.`)
-                        .setFooter({ text: `Ticket abierto por ${member.user.tag}` })
-                        .setTimestamp();
-
-                    const closeButton = new ButtonBuilder()
-                        .setCustomId(`ticket_close_${ticketChannel.id}`) // Custom ID para cerrar este ticket específico
-                        .setLabel('Cerrar Ticket')
-                        .setStyle(ButtonStyle.Danger);
-
-                    const row = new ActionRowBuilder().addComponents(closeButton);
-
-                    // Mencionar a todos los roles de soporte
-                    const supportMentions = supportRoleIds.map(id => `<@&${id}>`).join(', ');
-                    await ticketChannel.send({ content: `${supportMentions}, <@${member.id}>`, embeds: [embed], components: [row] });
-                    await interaction.editReply({ content: `✅ Tu ticket ha sido creado: ${ticketChannel}` });
-
-                    logModerationAction(
-                        guild,
-                        'TICKET_OPEN',
-                        member.user,
-                        client.user, // Bot como el que 'inició' la acción
-                        `Ticket #${ticketNumber} abierto`,
-                        `Canal: ${ticketChannel.name}\nRazón: Apertura desde panel`
-                    );
-
-                } catch (error) {
-                    console.error('Error al crear ticket desde el panel:', error);
-                    await interaction.editReply({ content: '❌ Hubo un error al crear tu ticket. Asegúrate de que el bot tenga los permisos necesarios.' });
-                }
-                return;
-            }
-
-            // --- Manejo del botón de cerrar ticket dentro del canal de ticket ---
-            if (interaction.customId.startsWith('ticket_close_')) {
-                const channelIdToClose = interaction.customId.split('_')[2];
-                const targetChannel = interaction.guild.channels.cache.get(channelIdToClose);
-
-                if (!targetChannel || targetChannel.id !== interaction.channel.id) {
-                    return interaction.reply({ content: '❌ No puedes cerrar un ticket que no sea este.', ephemeral: true });
+                let totalVotes = 0;
+                for (const option of pollData.options) {
+                    totalVotes += pollData.votes[option] || 0;
                 }
 
-                const guild = interaction.guild;
-                const member = interaction.member;
-
-                const ticketCategoryId = getTicketSettings(guild.id, 'ticketCategoryId');
-                const supportRoleIds = getTicketSettings(guild.id, 'supportRoleIds'); // Obtener array
-                const ticketLogChannelId = getTicketSettings(guild.id, 'ticketLogChannelId');
-
-                // Asegurarse de que el comando se usa en un canal de ticket y que la configuración existe
-                if (interaction.channel.parentId !== ticketCategoryId || !ticketCategoryId || !supportRoleIds || supportRoleIds.length === 0 || !ticketLogChannelId) {
-                    return interaction.reply({ content: '❌ Este no parece ser un canal de ticket válido o la configuración del ticket es incorrecta.', ephemeral: true });
+                let resultsContent = '';
+                if (totalVotes === 0) {
+                    resultsContent = 'Nadie votó en esta encuesta.';
+                } else {
+                    for (let i = 0; i < pollData.options.length; i++) {
+                        const option = pollData.options[i];
+                        const votesCount = pollData.votes[option];
+                        const percentage = totalVotes > 0 ? ((votesCount / totalVotes) * 100).toFixed(2) : 0;
+                        resultsContent += `**${option}**: ${votesCount} votos (${percentage}%)\n`;
+                    }
                 }
 
-                // Asegurarse de que el usuario tiene permisos para cerrar (soporte o creador del ticket)
-                const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId)); // CAMBIO: Comprueba si tiene ALGUNO de los roles
-                const isTicketCreator = targetChannel.topic === `Ticket de ${member.id}`;
-
-                if (!isSupport && !isTicketCreator) {
-                    return interaction.reply({ content: '❌ Solo el creador del ticket o un miembro del equipo de soporte puede cerrar este ticket.', ephemeral: true });
-                }
-
-                await interaction.deferReply(); // DeferReply para que el bot tenga tiempo de procesar
+                resultsEmbed.addFields({ name: 'Votación Final', value: resultsContent });
+                resultsEmbed.setFooter({ text: `Encuesta finalizada por ${interaction.user.tag}` });
+                resultsEmbed.setTimestamp();
 
                 try {
-                    // Generar transcripción (opcional, requeriría una librería como discord-html-transcripts)
-                    // Por ahora, solo se simula un log
-                    const logChannel = guild.channels.cache.get(ticketLogChannelId);
-                    const ticketNumberMatch = targetChannel.name.match(/ticket-(\d+)-/);
-                    const ticketNumber = ticketNumberMatch ? ticketNumberMatch[1] : 'N/A';
-
-                    const closeEmbed = new EmbedBuilder()
-                        .setColor('Red')
-                        .setTitle(`Ticket #${ticketNumber} Cerrado`)
-                        .setDescription(`**Cerrado por:** ${member.user.tag}\n**Razón:** Cerrado desde el panel`)
-                        .setTimestamp();
-
-                    if (logChannel) {
-                        await logChannel.send({ embeds: [closeEmbed] });
-                        // Aquí podrías adjuntar la transcripción si la generas
-                    }
-
-                    logModerationAction(
-                        guild,
-                        'TICKET_CLOSE',
-                        member.user, // O el usuario que inició el ticket si quieres que el log sea sobre él
-                        member.user, // Moderador que cerró
-                        `Ticket #${ticketNumber} cerrado`,
-                        `Canal: ${targetChannel.name}\nRazón: Cerrado desde el botón`
-                    );
-
-                    await targetChannel.delete('Ticket cerrado desde el botón.');
-                    await interaction.followUp({ content: `✅ Ticket #${ticketNumber} cerrado con éxito.`, ephemeral: true });
-
+                    const originalMessage = await interaction.channel.messages.fetch(pollMessageId);
+                    await originalMessage.edit({ embeds: [resultsEmbed], components: [] });
+                    await interaction.editReply({ content: '✅ La encuesta ha sido finalizada y los resultados publicados.', flags: [MessageFlags.Ephemeral] });
                 } catch (error) {
-                    console.error('Error al cerrar ticket desde botón:', error);
-                    await interaction.followUp({ content: '❌ Hubo un error al cerrar el ticket. Asegúrate de que el bot tenga los permisos para gestionar canales.', ephemeral: true });
-                }
-                return;
-            }
-
-
-            // Manejo del botón de verificación (EXISTENTE)
-            if (interaction.customId === 'verify_button') {
-                const guildId = interaction.guild.id;
-                const guildConfig = interaction.client.getGuildConfig(guildId);
-
-                const unverifiedRoleId = guildConfig.unverifiedRoleId;
-                const verifiedRoleId = guildConfig.verifiedRoleId;
-
-                if (!unverifiedRoleId || !verifiedRoleId) {
-                    await interaction.reply({
-                        content: '❌ Los roles de verificación no han sido configurados para este servidor. Un administrador debe usar `/setrole verificacion` para establecerlos.',
-                        flags: [MessageFlags.Ephemeral]
-                    });
-                    return;
-                }
-
-                let unverifiedRole = interaction.guild.roles.cache.get(unverifiedRoleId);
-                let verifiedRole = interaction.guild.roles.cache.get(verifiedRoleId);
-
-                if (!unverifiedRole || !verifiedRole) {
-                    await interaction.reply({
-                        content: '❌ Los roles configurados para la verificación no se encontraron en este servidor. Asegúrate de que existen o reconfigúralos con `/setrole verificacion`.',
-                        flags: [MessageFlags.Ephemeral]
-                    });
-                    return;
-                }
-
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-                try {
-                    const member = interaction.member;
-
-                    if (member.roles.cache.has(verifiedRole.id)) {
-                        return interaction.editReply({ content: '✅ ¡Ya estás verificado!' });
-                    }
-
-                    if (unverifiedRole.position >= interaction.guild.members.me.roles.highest.position ||
-                        verifiedRole.position >= interaction.guild.members.me.roles.highest.position) {
-                        console.warn(`[WARN] Los roles de verificación pueden estar por encima del rol del bot. Revisa la jerarquía de roles.`);
-                        return interaction.editReply({ content: '❌ Hubo un error. Asegúrate de que el rol de Sentinel esté por encima de los roles "No Verificado" y "Verificado" en la jerarquía de roles del servidor.', flags: [MessageFlags.Ephemeral] });
-                    }
-
-                    if (member.roles.cache.has(unverifiedRole.id)) {
-                        await member.roles.remove(unverifiedRole, 'Usuario verificado.');
-                    }
-                    await member.roles.add(verifiedRole, 'Usuario verificado.');
-
-                    await interaction.editReply({ content: '✅ ¡Gracias por verificarte! Ahora tienes acceso al servidor.' });
-
-                    logModerationAction(
-                        interaction.guild,
-                        'USER_VERIFIED',
-                        member.user,
-                        interaction.client.user,
-                        'Usuario se ha verificado.',
-                        `Roles: Quitado '${unverifiedRole.name}', Añadido '${verifiedRole.name}'`
-                    );
-
-                } catch (error) {
-                    console.error(`Error al verificar usuario ${member.user.tag}:`, error);
-                    await interaction.editReply({ content: '❌ Hubo un error al intentar verificarte. Asegúrate de que el bot tenga los permisos de "Gestionar Roles".', flags: [MessageFlags.Ephemeral] });
-                }
-                return;
-            }
-
-            // --- Manejo de botones de Encuesta (EXISTENTE) ---
-            if (interaction.customId.startsWith('poll_')) {
-                const parts = interaction.customId.split('_');
-                const pollType = parts[1];
-                const pollMessageId = parts[2];
-
-                const activePolls = interaction.client.getActivePolls();
-
-                const pollData = activePolls[pollMessageId];
-
-                if (!pollData) {
-                    console.error(`[POLL ERROR] No se encontró la información para la encuesta con ID: ${pollMessageId}`);
-                    return interaction.reply({ content: '❌ Esta encuesta ya no está activa o no se encontró su información.', flags: [MessageFlags.Ephemeral] });
-                }
-
-                if (interaction.guild.id !== pollData.guildId || interaction.channel.id !== pollData.channelId) {
-                    console.warn(`[POLL WARN] Interacción de encuesta en canal/gremio incorrecto. Actual: G:${interaction.guild.id}/C:${interaction.channel.id}, Esperado: G:${pollData.guildId}/C:${pollData.channelId}`);
-                    return interaction.reply({ content: '❌ Esta encuesta no es válida en este canal o servidor.', flags: [MessageFlags.Ephemeral] });
-                }
-
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-                if (pollType === 'vote') {
-                    const optionIndex = parseInt(parts[3]);
-                    const userId = interaction.user.id;
-                    const optionName = pollData.options[optionIndex];
-
-                    if (pollData.votedUsers[userId]) {
-                        return interaction.editReply({ content: `✅ Ya votaste en esta encuesta por: **${pollData.votedUsers[userId]}**. Solo puedes votar una vez.` });
-                    }
-
-                    pollData.votes[optionName]++;
-                    pollData.votedUsers[userId] = optionName;
-
-                    interaction.client.addOrUpdateActivePoll(pollMessageId, pollData);
-
-                    await interaction.editReply({ content: `✅ ¡Tu voto por **${optionName}** ha sido registrado!` });
-
-                } else if (pollType === 'end') {
-                    if (interaction.user.id !== pollData.creatorId && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-                        return interaction.editReply({ content: '❌ Solo el creador de la encuesta o un administrador puede finalizarla.', flags: [MessageFlags.Ephemeral] });
-                    }
-
-                    interaction.client.removeActivePoll(pollMessageId);
-
-                    const resultsEmbed = new EmbedBuilder()
-                        .setColor(0x32CD32)
-                        .setTitle('📊 Resultados de la Encuesta')
-                        .setDescription(`**Pregunta: ${pollData.question}**\n\n`);
-
-                    let resultsContent = '';
-                    let totalVotes = 0;
-                    for (const option in pollData.votes) {
-                        totalVotes += pollData.votes[option];
-                    }
-
-                    if (totalVotes === 0) {
-                        resultsContent = 'Nadie votó en esta encuesta.';
-                    } else {
-                        for (let i = 0; i < pollData.options.length; i++) {
-                            const option = pollData.options[i];
-                            const votesCount = pollData.votes[option];
-                            const percentage = totalVotes > 0 ? ((votesCount / totalVotes) * 100).toFixed(2) : 0;
-                            resultsContent += `**${option}**: ${votesCount} votos (${percentage}%)\n`;
-                        }
-                    }
-
-                    resultsEmbed.addFields({ name: 'Votación Final', value: resultsContent });
-                    resultsEmbed.setFooter({ text: `Encuesta finalizada por ${interaction.user.tag}` });
-                    resultsEmbed.setTimestamp();
-
-                    try {
-                        const originalMessage = await interaction.channel.messages.fetch(pollMessageId);
-                        await originalMessage.edit({ embeds: [resultsEmbed], components: [] });
-                        await interaction.editReply({ content: '✅ La encuesta ha sido finalizada y los resultados publicados.', flags: [MessageFlags.Ephemeral] });
-                    } catch (error) {
-                        console.error(`[POLL ERROR] Error al editar mensaje de encuesta ID ${pollMessageId}:`, error);
-                        await interaction.editReply({ content: '❌ Hubo un error al publicar los resultados de la encuesta.', flags: [MessageFlags.Ephemeral] });
-                    }
+                    console.error(`[POLL ERROR] Error al editar mensaje de encuesta ID ${pollMessageId}:`, error);
+                    await interaction.editReply({ content: '❌ Hubo un error al publicar los resultados de la encuesta.', flags: [MessageFlags.Ephemeral] });
                 }
             }
         }
