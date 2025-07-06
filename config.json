@@ -1,0 +1,18 @@
+{
+    "defaultSettings": {
+        "logChannelId": null,
+        "unverifiedRoleId": null,
+        "verifiedRoleId": null,
+        "ticketCategoryId": null,
+        "supportRoleIds": [],
+        "ticketLogChannelId": null,
+        "ticketCounter": 0,
+        "ticketPanelChannelId": null,
+        "ticketPanelMessageId": null,
+        "verificationPanelChannelId": null,
+        "verificationPanelMessageId": null
+    },
+    "guildSettings": {},
+    "activePolls": {},
+    "ongoingTicketSetups": {}
+}
