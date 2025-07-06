@@ -1,4 +1,5 @@
 // utils/configManager.js
+
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -18,60 +19,83 @@ function loadConfig() {
                 "logChannelId": null,
                 "unverifiedRoleId": null,
                 "verifiedRoleId": null,
-                // NUEVO: Valores predeterminados para tickets
                 "ticketCategoryId": null,
-                "supportRoleIds": [], // CAMBIO: Ahora es un array para múltiples roles
+                "supportRoleIds": [],
                 "ticketLogChannelId": null,
-                "ticketCounter": 0, // Contador de tickets global o por defecto
-                "ticketPanelChannelId": null, // NUEVO: Canal donde se envía el panel de tickets
-                "ticketPanelMessageId": null // NUEVO: ID del mensaje del panel de tickets
+                "ticketCounter": 0,
+                "ticketPanelChannelId": null,
+                "ticketPanelMessageId": null,
+                "activeTickets": {} // Asegura que activeTickets exista
             };
             if (!config.guildSettings) config.guildSettings = {};
             if (!config.activePolls) config.activePolls = {};
-            // NOTA: La sección de warnings no se inicializa aquí porque ya la tienes implementada.
-            console.log('[CONFIG] Configuración cargada exitosamente.');
+            if (!config.ongoingTicketSetups) config.ongoingTicketSetups = {};
+
+            // IMPORTANTE: Asegúrate de que cada guildSettings tenga todas las propiedades predeterminadas
+            // Esto manejará la adición de nuevos campos como los de verificación a configuraciones existentes.
+            for (const guildId in config.guildSettings) {
+                for (const key in config.defaultSettings) {
+                    // Si la clave no existe en la configuración del gremio o es undefined
+                    if (config.guildSettings[guildId][key] === undefined) {
+                        // Si la clave es un objeto no nulo y no un array (como activeTickets)
+                        if (typeof config.defaultSettings[key] === 'object' && config.defaultSettings[key] !== null && !Array.isArray(config.defaultSettings[key])) {
+                            config.guildSettings[guildId][key] = {}; // Inicializa como un objeto vacío
+                        } else if (Array.isArray(config.defaultSettings[key])) {
+                            // Si es un array (como supportRoleIds)
+                            config.guildSettings[guildId][key] = []; // Inicializa como un array vacío
+                        } else {
+                            // Para otros tipos de valores (null, string, number, boolean)
+                            config.guildSettings[guildId][key] = config.defaultSettings[key];
+                        }
+                    }
+                }
+            }
+            console.log('[CONFIG] Configuración cargada del disco.');
         } else {
-            // Si el archivo no existe, crea uno con la estructura predeterminada
+            // Si el archivo no existe, crea una configuración predeterminada
             config = {
-                "defaultSettings": {
-                    "logChannelId": null,
-                    "unverifiedRoleId": null,
-                    "verifiedRoleId": null,
-                    // NUEVO: Valores predeterminados para tickets
-                    "ticketCategoryId": null,
-                    "supportRoleIds": [], // CAMBIO: Ahora es un array
-                    "ticketLogChannelId": null,
-                    "ticketCounter": 0,
-                    "ticketPanelChannelId": null, // NUEVO
-                    "ticketPanelMessageId": null // NUEVO
+                defaultSettings: {
+                    logChannelId: null,
+                    unverifiedRoleId: null,
+                    verifiedRoleId: null,
+                    ticketCategoryId: null,
+                    supportRoleIds: [],
+                    ticketLogChannelId: null,
+                    ticketCounter: 0,
+                    ticketPanelChannelId: null,
+                    ticketPanelMessageId: null,
+                    activeTickets: {}
                 },
-                "guildSettings": {},
-                "activePolls": {}
-                // NOTA: La sección de warnings no se inicializa aquí.
+                guildSettings: {},
+                activePolls: {},
+                ongoingTicketSetups: {},
             };
-            saveConfig(); // Guarda el archivo recién creado
-            console.log('[CONFIG] config.json no encontrado. Se creó uno nuevo con configuración predeterminada.');
+            saveConfig();
+            console.log('[CONFIG] config.json no encontrado, se ha creado uno nuevo.');
         }
     } catch (error) {
-        console.error('[CONFIG ERROR] Error al cargar o parsear config.json:', error);
-        // En caso de error, inicializa una configuración vacía para evitar fallos
+        console.error('Error al cargar la configuración:', error);
+        // En caso de error de parseo o archivo corrupto, se recomienda resetear a la configuración predeterminada
+        // para evitar que el bot falle en bucle. Esto creará un nuevo config.json con los valores predeterminados.
         config = {
-            "defaultSettings": {
-                "logChannelId": null,
-                "unverifiedRoleId": null,
-                "verifiedRoleId": null,
-                // NUEVO: Valores predeterminados para tickets
-                "ticketCategoryId": null,
-                "supportRoleIds": [], // CAMBIO: Ahora es un array
-                "ticketLogChannelId": null,
-                "ticketCounter": 0,
-                "ticketPanelChannelId": null, // NUEVO
-                "ticketPanelMessageId": null // NUEVO
+            defaultSettings: {
+                logChannelId: null,
+                unverifiedRoleId: null,
+                verifiedRoleId: null,
+                ticketCategoryId: null,
+                supportRoleIds: [],
+                ticketLogChannelId: null,
+                ticketCounter: 0,
+                ticketPanelChannelId: null,
+                ticketPanelMessageId: null,
+                activeTickets: {}
             },
-            "guildSettings": {},
-            "activePolls": {}
-            // NOTA: La sección de warnings no se inicializa aquí.
+            guildSettings: {},
+            activePolls: {},
+            ongoingTicketSetups: {},
         };
+        saveConfig();
+        console.log('[CONFIG] Error al cargar config.json, se ha restablecido la configuración a los valores predeterminados.');
     }
 }
 
@@ -80,59 +104,78 @@ function loadConfig() {
  */
 function saveConfig() {
     try {
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 4), 'utf8');
-        console.log('[CONFIG] Configuración guardada exitosamente.');
+        console.log('[SAVE CONFIG] Estado de ongoingTicketSetups ANTES de guardar:', JSON.stringify(config.ongoingTicketSetups, null, 2));
+        const data = JSON.stringify(config, null, 4);
+        fs.writeFileSync(configPath, data, 'utf8');
+        console.log('[CONFIG] Configuración guardada correctamente.');
     } catch (error) {
-        console.error('[CONFIG ERROR] Error al guardar config.json:', error);
+        console.error('[CONFIG ERROR] Error al guardar la configuración en config.json:', error);
+        if (error.code === 'EACCES') {
+            console.error('[CONFIG ERROR] Permiso denegado al escribir en config.json. Verifica los permisos del archivo/carpeta.');
+        }
     }
 }
 
 /**
- * Obtiene la configuración específica de un gremio, o los valores predeterminados si no hay una configuración específica.
- * @param {string} guildId El ID del Gremio.
+ * Obtiene la configuración de un gremio específico o la predeterminada.
+ * @param {string} guildId El ID del gremio.
  * @returns {object} La configuración del gremio.
  */
 function getGuildConfig(guildId) {
-    const guildSpecificConfig = config.guildSettings[guildId] || {};
-    return { ...config.defaultSettings, ...guildSpecificConfig };
+    // Si no existe la configuración para el gremio, inicialízala fusionando con defaultSettings
+    if (!config.guildSettings[guildId]) {
+        config.guildSettings[guildId] = {
+            ...config.defaultSettings, // Copia las configuraciones predeterminadas
+            disabledCommands: [], // Inicializa como un array vacío si no existe
+            // activeTickets ya está en defaultSettings, por lo que se copiará desde allí
+        };
+        saveConfig(); // Guarda la nueva configuración del gremio
+    }
+    return config.guildSettings[guildId];
 }
 
 /**
- * Establece o actualiza la configuración específica de un gremio.
- * @param {string} guildId El ID del Gremio.
- * @param {object} settings Un objeto con las propiedades de configuración a establecer o actualizar.
+ * Establece o actualiza la configuración de un gremio.
+ * @param {string} guildId El ID del gremio.
+ * @param {object} newSettings Un objeto con las nuevas configuraciones a aplicar.
  */
-function setGuildConfig(guildId, settings) {
-    if (!config.guildSettings[guildId]) {
-        config.guildSettings[guildId] = {};
-    }
-    Object.assign(config.guildSettings[guildId], settings);
+function setGuildConfig(guildId, newSettings) {
+    const guildConfig = getGuildConfig(guildId); // Asegura que el gremio exista en la config y esté inicializado
+    Object.assign(guildConfig, newSettings); // Fusiona las nuevas configuraciones
     saveConfig();
 }
 
-// Funciones para gestionar la configuración de tickets (ya existentes)
+/**
+ * Obtiene la configuración de tickets de un gremio.
+ * NOTA: Este getter devuelve el objeto completo de configuración del gremio, no solo una subsección de tickets.
+ * @param {string} guildId El ID del gremio.
+ * @returns {object} La configuración del gremio (incluyendo ticket settings).
+ */
 function getTicketSettings(guildId) {
-    const guildConfig = getGuildConfig(guildId);
-    return {
-        ticketCategoryId: guildConfig.ticketCategoryId,
-        supportRoleIds: guildConfig.supportRoleIds,
-        ticketLogChannelId: guildConfig.ticketLogChannelId,
-        ticketCounter: guildConfig.ticketCounter,
-        ticketPanelChannelId: guildConfig.ticketPanelChannelId,
-        ticketPanelMessageId: guildConfig.ticketPanelMessageId
-    };
+    return getGuildConfig(guildId); // Retorna directamente la configuración del gremio
 }
 
+/**
+ * Establece una configuración específica de tickets para un gremio.
+ * @param {string} guildId El ID del gremio.
+ * @param {string} key La clave de la configuración de ticket (ej. 'ticketCategoryId').
+ * @param {*} value El valor a establecer.
+ */
 function setTicketSetting(guildId, key, value) {
     const guildConfig = getGuildConfig(guildId);
-    guildConfig[key] = value;
-    setGuildConfig(guildId, { [key]: value });
+    guildConfig[key] = value; // Directamente en el objeto guildConfig
+    saveConfig();
 }
 
+/**
+ * Incrementa el contador de tickets para un gremio.
+ * @param {string} guildId El ID del gremio.
+ * @returns {number} El nuevo valor del contador de tickets.
+ */
 function incrementTicketCounter(guildId) {
     const guildConfig = getGuildConfig(guildId);
     const newCounter = (guildConfig.ticketCounter || 0) + 1;
-    setTicketSetting(guildId, 'ticketCounter', newCounter);
+    setTicketSetting(guildId, 'ticketCounter', newCounter); // <-- CORRECCIÓN: Usar setTicketSetting
     return newCounter;
 }
 
@@ -151,7 +194,41 @@ function removeActivePoll(messageId) {
     saveConfig();
 }
 
-// Las funciones getCommandEnabledStatus y toggleCommandStatus han sido eliminadas.
+// NUEVAS Funciones para gestionar el estado de la configuración de tickets en curso
+function getOngoingTicketSetup(userId) {
+    return config.ongoingTicketSetups[userId];
+}
+
+function setOngoingTicketSetup(userId, setupData) {
+    config.ongoingTicketSetups[userId] = setupData;
+    console.log(`[ONGOING TICKET SETUP] Estableciendo setup para ${userId}:`, JSON.stringify(config.ongoingTicketSetups[userId], null, 2));
+    saveConfig();
+}
+
+function removeOngoingTicketSetup(userId) {
+    delete config.ongoingTicketSetups[userId];
+    saveConfig();
+}
+
+// NUEVAS Funciones para gestionar tickets activos
+function getActiveTicket(guildId, channelId) {
+    const guildConfig = getGuildConfig(guildId);
+    return guildConfig.activeTickets[channelId];
+}
+
+function addActiveTicket(guildId, channelId, ticketData) {
+    const guildConfig = getGuildConfig(guildId);
+    guildConfig.activeTickets[channelId] = ticketData;
+    saveConfig();
+}
+
+function removeActiveTicket(guildId, channelId) {
+    const guildConfig = getGuildConfig(guildId);
+    if (guildConfig.activeTickets && guildConfig.activeTickets[channelId]) {
+        delete guildConfig.activeTickets[channelId];
+        saveConfig();
+    }
+}
 
 /**
  * Elimina toda la configuración específica de un Gremio, volviendo a los valores predeterminados.
@@ -167,7 +244,6 @@ function clearGuildConfig(guildId) {
     }
 }
 
-
 // Carga la configuración al iniciar el módulo
 loadConfig();
 
@@ -182,5 +258,11 @@ module.exports = {
     getActivePolls,
     addOrUpdateActivePoll,
     removeActivePoll,
+    getOngoingTicketSetup,
+    setOngoingTicketSetup,
+    removeOngoingTicketSetup,
+    getActiveTicket,
+    addActiveTicket,
+    removeActiveTicket,
     clearGuildConfig,
 };

@@ -25,8 +25,7 @@ const client = new Client({
 client.commands = new Collection();
 // Inicializa un Map para almacenar mensajes borrados/editados para el comando /snipe
 client.snipedMessages = new Map();
-// NUEVO: Inicializar un Map para almacenar el estado temporal de la configuración de tickets
-client.ticketSetupState = new Map();
+// REMOVIDO: client.ticketSetupState = new Map(); // Esta línea ya no es necesaria
 
 // --- ASIGNAR TODAS LAS FUNCIONES DE CONFIGMANAGER AL CLIENTE ---
 client.getGuildConfig = configManager.getGuildConfig;
@@ -34,27 +33,43 @@ client.setGuildConfig = configManager.setGuildConfig;
 client.getActivePolls = configManager.getActivePolls;
 client.addOrUpdateActivePoll = configManager.addOrUpdateActivePoll;
 client.removeActivePoll = configManager.removeActivePoll;
-// Las funciones getCommandEnabledStatus y toggleCommandStatus han sido eliminadas.
 
-// --- Carga Dinámica de Comandos ---
-const foldersPath = path.join(__dirname, 'commands');
-const commandFolders = fs.readdirSync(foldersPath);
+// Asignar las funciones para la configuración de tickets en curso
+client.getOngoingTicketSetup = configManager.getOngoingTicketSetup;
+client.setOngoingTicketSetup = configManager.setOngoingTicketSetup;
+client.removeOngoingTicketSetup = configManager.removeOngoingTicketSetup;
+
+// Asignar las funciones para tickets activos
+client.getActiveTicket = configManager.getActiveTicket;
+client.addActiveTicket = configManager.addActiveTicket;
+client.removeActiveTicket = configManager.removeActiveTicket;
+
+// Asignar las funciones para la configuración de tickets del gremio
+client.getTicketSettings = configManager.getTicketSettings;
+client.setTicketSetting = configManager.setTicketSetting;
+client.incrementTicketCounter = configManager.incrementTicketCounter;
+
+
+// --- Carga de Comandos ---
+const commandsPath = path.join(__dirname, 'commands');
+const commandFolders = fs.readdirSync(commandsPath);
 
 for (const folder of commandFolders) {
-    const commandsPath = path.join(foldersPath, folder);
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    const folderPath = path.join(commandsPath, folder);
+    const commandFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.js'));
     for (const file of commandFiles) {
-        const filePath = path.join(commandsPath, file);
+        const filePath = path.join(folderPath, file);
         const command = require(filePath);
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
         } else {
-            console.log(`[ADVERTENCIA] El comando en ${filePath} le falta una propiedad "data" o "execute" requerida.`);
+            console.warn(`[ADVERTENCIA] El comando en ${filePath} no tiene las propiedades "data" o "execute" requeridas.`);
         }
     }
 }
 
-// --- Carga Dinámica de Eventos ---
+
+// --- Carga de Eventos ---
 const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
 
@@ -67,6 +82,7 @@ for (const file of eventFiles) {
         client.on(event.name, (...args) => event.execute(...args, client));
     }
 }
+
 
 // --- Inicio de Sesión del Bot ---
 client.login(process.env.DISCORD_TOKEN).catch(error => {
@@ -92,5 +108,6 @@ client.once(Events.ClientReady, async c => {
         console.log('Comandos de barra registrados globalmente con Discord.');
     } catch (error) {
         console.error('Error al registrar comandos globalmente:', error);
+        console.error('Asegúrate de que el bot tiene el scope "applications.commands" en su enlace de invitación.');
     }
 });

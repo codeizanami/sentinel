@@ -26,10 +26,10 @@ module.exports = {
                 unverifiedRole = await interaction.guild.roles.create({
                     name: unverifiedRoleName,
                     color: '#FF0000', // Rojo para no verificados
-                    permissions: [], // Sin permisos por defecto
-                    reason: 'Rol creado para miembros no verificados.',
+                    permissions: [],
+                    reason: 'Rol creado automáticamente para miembros no verificados.',
                 });
-                await interaction.followUp({ content: `✅ Rol **${unverifiedRoleName}** creado.`, ephemeral: true });
+                console.log(`[VERIFY_SETUP] Rol '${unverifiedRoleName}' creado automáticamente: ${unverifiedRole.id}`);
             }
 
             // Crear rol "Verificado" si no existe
@@ -37,39 +37,27 @@ module.exports = {
                 verifiedRole = await interaction.guild.roles.create({
                     name: verifiedRoleName,
                     color: '#00FF00', // Verde para verificados
-                    permissions: [PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ViewChannel], // Permisos básicos
-                    reason: 'Rol creado para miembros verificados.',
+                    permissions: [],
+                    reason: 'Rol creado automáticamente para miembros verificados.',
                 });
-                await interaction.followUp({ content: `✅ Rol **${verifiedRoleName}** creado.`, ephemeral: true });
+                console.log(`[VERIFY_SETUP] Rol '${verifiedRoleName}' creado automáticamente: ${verifiedRole.id}`);
             }
 
-            // Mover el rol "No Verificado" por debajo del "Verificado" y del bot para asegurar permisos
-            if (unverifiedRole.position >= verifiedRole.position) {
-                 await unverifiedRole.setPosition(verifiedRole.position - 1, { reason: 'Ajustando jerarquía de roles para verificación.' });
-                 await interaction.followUp({ content: `✅ Jerarquía de roles ajustada: **${unverifiedRoleName}** ahora está debajo de **${verifiedRoleName}**.`, ephemeral: true });
+            // Establecer permisos para el canal actual para que solo los verificados lo vean
+            // Y los no verificados NO vean los canales principales
+            await interaction.channel.permissionOverwrites.edit(interaction.guild.id, {
+                ViewChannel: false // Por defecto, nadie lo ve si no tiene el rol
+            });
+            if (unverifiedRole) {
+                await interaction.channel.permissionOverwrites.edit(unverifiedRole.id, {
+                    ViewChannel: true // Solo los no verificados pueden ver este canal
+                });
             }
-            if (unverifiedRole.position >= interaction.guild.members.me.roles.highest.position) {
-                await unverifiedRole.setPosition(interaction.guild.members.me.roles.highest.position - 1, { reason: 'Ajustando jerarquía del rol no verificado para que el bot pueda gestionarlo.' });
-                await interaction.followUp({ content: `✅ Jerarquía de roles ajustada: **${unverifiedRoleName}** ahora está debajo del rol del bot.`, ephemeral: true });
+            if (verifiedRole) {
+                await interaction.channel.permissionOverwrites.edit(verifiedRole.id, {
+                    ViewChannel: false // Los verificados no necesitan ver el canal de verificación.
+                });
             }
-
-
-            // Configurar permisos del canal de verificación para @everyone y el rol "No Verificado"
-            const everyoneRole = interaction.guild.roles.everyone;
-            await interaction.channel.permissionOverwrites.edit(everyoneRole, {
-                ViewChannel: true,
-                ReadMessageHistory: true,
-                SendMessages: false, // NO pueden enviar mensajes
-            }, { reason: 'Ajustando permisos del canal para verificación.' });
-            await interaction.channel.permissionOverwrites.edit(unverifiedRole, {
-                ViewChannel: true,
-                ReadMessageHistory: true,
-                SendMessages: false, // NO pueden enviar mensajes
-            }, { reason: 'Ajustando permisos del canal para el rol No Verificado.' });
-             await interaction.channel.permissionOverwrites.edit(verifiedRole, {
-                ViewChannel: false, // Los verificados no necesitan ver este canal
-            }, { reason: 'Los miembros verificados no necesitan ver el canal de verificación.' });
-
 
             const verifyButton = new ButtonBuilder()
                 .setCustomId('verify_button')
@@ -79,10 +67,21 @@ module.exports = {
             const row = new ActionRowBuilder()
                 .addComponents(verifyButton);
 
-            await interaction.channel.send({
-                content: `¡Bienvenido al servidor **${interaction.guild.name}**!\n\nPara acceder al resto de los canales y participar, por favor, haz clic en el botón **"Verificarse"** a continuación.`,
+            const verificationMessage = await interaction.channel.send({ // Guarda el mensaje enviado
+                content: `¡Bienvenido al servidor **${interaction.guild.name}**!\\n\\nPara acceder al resto de los canales y participar, por favor, haz clic en el botón **\"Verificarse\"** a continuación.`,
                 components: [row],
             });
+
+            // --- ¡NUEVO! Guardar las IDs en config.json ---
+            const guildConfig = interaction.client.getGuildConfig(interaction.guild.id);
+            guildConfig.unverifiedRoleId = unverifiedRole.id;
+            guildConfig.verifiedRoleId = verifiedRole.id;
+            guildConfig.verificationPanelChannelId = interaction.channel.id; // Guarda el canal del panel
+            guildConfig.verificationPanelMessageId = verificationMessage.id; // Guarda la ID del mensaje
+            interaction.client.setGuildConfig(interaction.guild.id, guildConfig);
+            // La función setGuildConfig ya llama a saveConfig internamente.
+            console.log(`[VERIFY_SETUP] Configuración de verificación guardada para ${interaction.guild.id}:`, JSON.stringify(guildConfig, null, 2));
+            // --- FIN NUEVO ---
 
             await interaction.editReply({ content: '✅ El mensaje de verificación ha sido enviado a este canal y los roles/permisos básicos han sido verificados/creados.', ephemeral: true });
 
@@ -97,7 +96,7 @@ module.exports = {
 
         } catch (error) {
             console.error('Error al configurar la verificación:', error);
-            await interaction.editReply({ content: '❌ Hubo un error al configurar el sistema de verificación. Asegúrate de que el bot tenga los permisos de "Gestionar Roles" y "Gestionar Canales".', ephemeral: true });
+            await interaction.editReply({ content: '❌ Hubo un error al configurar el sistema de verificación. Asegúrate de que el bot tenga los permisos de \"Gestionar Roles\" y \"Gestionar Canales\".', ephemeral: true });
         }
     },
 };

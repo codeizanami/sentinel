@@ -1,6 +1,6 @@
 // commands/utility/ticket.js
 const { SlashCommandBuilder, ChannelType, PermissionsBitField, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getTicketSettings, incrementTicketCounter, setTicketSetting } = require('../../utils/configManager');
+const { getTicketSettings, setTicketSetting } = require('../../utils/configManager'); // setTicketSetting se importa, pero se usa incrementTicketCounter del cliente
 const { logModerationAction } = require('../../utils/logger');
 
 module.exports = {
@@ -26,7 +26,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('add')
-                .setDescription('Añade un usuario al ticket actual.')
+                .setDescription('Añade un usuario a un ticket existente.')
                 .addUserOption(option =>
                     option.setName('usuario')
                         .setDescription('El usuario a añadir al ticket.')
@@ -34,206 +34,227 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('remove')
-                .setDescription('Elimina un usuario del ticket actual.')
+                .setDescription('Elimina un usuario de un ticket existente.')
                 .addUserOption(option =>
                     option.setName('usuario')
                         .setDescription('El usuario a eliminar del ticket.')
                         .setRequired(true))),
-    async execute(interaction, client) {
+    async execute(interaction, client) { // Asegúrate de pasar 'client' aquí
         const { guild, member, channel } = interaction;
+        const subcommand = interaction.options.getSubcommand();
+        const guildId = guild.id;
 
-        const ticketCategoryId = getTicketSettings(guild.id, 'ticketCategoryId');
-        const supportRoleIds = getTicketSettings(guild.id, 'supportRoleIds'); // CAMBIO: Obtener array
-        const ticketLogChannelId = getTicketSettings(guild.id, 'ticketLogChannelId');
-        const ticketPanelChannelId = getTicketSettings(guild.id, 'ticketPanelChannelId'); // NUEVO
-        const ticketPanelMessageId = getTicketSettings(guild.id, 'ticketPanelMessageId'); // NUEVO
+        const ticketSettings = client.getTicketSettings(guildId); // Usa client.getTicketSettings
+        const { ticketCategoryId, supportRoleIds, ticketLogChannelId } = ticketSettings;
 
-
-        if (!ticketCategoryId || !supportRoleIds || supportRoleIds.length === 0 || !ticketLogChannelId) {
-            return interaction.reply({
-                content: '❌ El sistema de tickets no está configurado. Por favor, pide a un administrador que use `/ticketsetup`.',
-                ephemeral: true
-            });
+        if (!ticketCategoryId || supportRoleIds.length === 0 || !ticketLogChannelId) {
+            return interaction.reply({ content: '❌ El sistema de tickets no está configurado correctamente en este servidor. Un administrador debe usar `/ticketsetup` primero.', ephemeral: true });
         }
 
-        const subcommand = interaction.options.getSubcommand();
-
         if (subcommand === 'crear_comando') {
-            // Este comando de 'crear' es un respaldo o para usar si no se usa el panel GUI.
-            // Si el panel de tickets ya está configurado, es mejor que los usuarios usen el panel.
-            if (ticketPanelChannelId && ticketPanelMessageId) {
-                return interaction.reply({
-                    content: `❌ El sistema de tickets de este servidor usa un panel para abrir tickets. Por favor, dirígete a <#${ticketPanelChannelId}> y usa el botón.`,
-                    ephemeral: true
-                });
-            }
+            const reason = interaction.options.getString('razon') || 'No se proporcionó una razón.';
 
-            const reason = interaction.options.getString('razon') || 'Sin razón especificada.';
-
-            // Evitar que un usuario cree múltiples tickets
-            const existingTicket = guild.channels.cache.find(c =>
-                c.parentId === ticketCategoryId && c.topic === `Ticket de ${member.id}`
+            // Verificar si el usuario ya tiene un ticket abierto
+            const activeTickets = client.getActiveTicket(guildId);
+            const userActiveTicket = Object.values(activeTickets).find(
+                (ticket) => ticket.creatorId === interaction.user.id
             );
-            if (existingTicket) {
+
+            if (userActiveTicket) {
                 return interaction.reply({
-                    content: `❌ Ya tienes un ticket abierto: ${existingTicket}`,
-                    ephemeral: true
+                    content: `❌ Ya tienes un ticket abierto: <#${userActiveTicket.channelId}>`,
+                    ephemeral: true,
                 });
             }
+
+
+            await interaction.deferReply({ ephemeral: true }); // Deferir la respuesta para dar tiempo a la creación
 
             try {
-                const ticketNumber = incrementTicketCounter(guild.id);
-                const channelName = `ticket-${ticketNumber}-${member.user.username.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase()}`;
+                const ticketNumber = client.incrementTicketCounter(guildId); // Usar client.incrementTicketCounter
+                const newChannelName = `ticket-${ticketNumber}-${interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, '')}`;
 
-                const permissionOverwrites = [
+                // Permisos para el canal de ticket
+                const permissions = [
                     {
-                        id: guild.id,
-                        deny: [PermissionsBitField.Flags.ViewChannel], // Nadie puede ver el canal por defecto
+                        id: guild.roles.everyone,
+                        deny: [PermissionsBitField.Flags.ViewChannel], // Denegar a @everyone
                     },
                     {
-                        id: member.id,
-                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                        id: interaction.user.id,
+                        allow: [
+                            PermissionsBitField.Flags.ViewChannel,
+                            PermissionsBitField.Flags.SendMessages,
+                            PermissionsBitField.Flags.ReadMessageHistory,
+                        ],
                     },
-                    // Permitir a todos los roles de soporte ver y gestionar el ticket
+                    // Añadir permisos para cada rol de soporte
                     ...supportRoleIds.map(roleId => ({
                         id: roleId,
-                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                        allow: [
+                            PermissionsBitField.Flags.ViewChannel,
+                            PermissionsBitField.Flags.SendMessages,
+                            PermissionsBitField.Flags.ReadMessageHistory,
+                        ],
                     })),
-                    // Permitir que el bot vea el canal para gestionar
-                    {
-                        id: client.user.id,
-                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels],
-                    }
                 ];
 
                 const ticketChannel = await guild.channels.create({
-                    name: channelName,
+                    name: newChannelName,
                     type: ChannelType.GuildText,
                     parent: ticketCategoryId,
-                    topic: `Ticket de ${member.id}`, // Para identificar el ticket por usuario
-                    permissionOverwrites: permissionOverwrites,
+                    permissionOverwrites: permissions,
+                    reason: `Nuevo ticket creado por ${interaction.user.tag}`
                 });
 
-                const embed = new EmbedBuilder()
-                    .setColor('Green')
-                    .setTitle(`Ticket #${ticketNumber} - ${member.user.tag}`)
-                    .setDescription(`**Razón:** ${reason}\n\nUn miembro del equipo de soporte te atenderá pronto.`)
-                    .setFooter({ text: `Ticket abierto por ${member.user.tag}` })
+                // Añadir el ticket a la persistencia
+                client.addActiveTicket(guildId, ticketChannel.id, {
+                    channelId: ticketChannel.id,
+                    creatorId: interaction.user.id,
+                    createdAt: Date.now(),
+                    reason: reason,
+                });
+
+
+                const ticketEmbed = new EmbedBuilder()
+                    .setColor('#0099ff')
+                    .setTitle(`Ticket #${ticketNumber} - ${interaction.user.username}`)
+                    .setDescription(`**Razón:** ${reason}\n\nUn miembro del equipo de soporte se pondrá en contacto contigo pronto.`)
+                    .addFields(
+                        { name: 'Usuario', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: 'Fecha de Creación', value: `<t:${Math.floor(Date.now() / 1000)}:f>`, inline: true }
+                    )
+                    .setFooter({ text: 'Sistema de Tickets' })
                     .setTimestamp();
 
                 const closeButton = new ButtonBuilder()
-                    .setCustomId(`ticket_close_${ticketChannel.id}`) // Custom ID para cerrar este ticket específico
+                    .setCustomId('close_ticket')
                     .setLabel('Cerrar Ticket')
-                    .setStyle(ButtonStyle.Danger);
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🔒');
 
                 const row = new ActionRowBuilder().addComponents(closeButton);
 
-                // Mencionar a todos los roles de soporte
-                const supportMentions = supportRoleIds.map(id => `<@&${id}>`).join(', ');
-                await ticketChannel.send({ content: `${supportMentions}, <@${member.id}>`, embeds: [embed], components: [row] });
-                await interaction.reply({ content: `✅ Tu ticket ha sido creado: ${ticketChannel}`, ephemeral: true });
+                await ticketChannel.send({
+                    content: `<@${interaction.user.id}> ${supportRoleIds.map(id => `<@&${id}>`).join(', ')}`, // Menciona al usuario y roles de soporte
+                    embeds: [ticketEmbed],
+                    components: [row]
+                });
+
+                await interaction.editReply({ content: `✅ ¡Tu ticket ha sido creado! Dirígete a ${ticketChannel}.`, ephemeral: true });
 
                 logModerationAction(
                     guild,
                     'TICKET_OPEN',
-                    member.user,
-                    client.user, // Bot como el que 'inició' la acción
-                    `Ticket #${ticketNumber} abierto`,
-                    `Canal: ${ticketChannel.name}\nRazón: ${reason} (comando)`
+                    interaction.user,
+                    client.user, // El bot es el "moderador" que abre el ticket
+                    reason,
+                    `Ticket: #${ticketChannel.name} (${ticketChannel.id})`
                 );
 
             } catch (error) {
-                console.error('Error al crear ticket:', error);
-                await interaction.reply({ content: '❌ Hubo un error al crear tu ticket. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
+                console.error('Error al crear el ticket:', error);
+                await interaction.editReply({ content: '❌ Hubo un error al crear tu ticket. Por favor, asegúrate de que el bot tenga los permisos necesarios y que la categoría esté configurada correctamente.', ephemeral: true });
             }
         } else if (subcommand === 'cerrar') {
-            const reason = interaction.options.getString('razon') || 'Sin razón especificada.';
+            const reason = interaction.options.getString('razon') || 'No se proporcionó una razón.';
 
-            // Asegurarse de que el comando se usa en un canal de ticket
-            if (channel.parentId !== ticketCategoryId) {
-                return interaction.reply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket.', ephemeral: true });
+            await interaction.deferReply({ ephemeral: true });
+
+            const activeTickets = client.getActiveTicket(guildId);
+            const ticketData = activeTickets[channel.id];
+
+            // Verificar si el canal actual es un ticket activo
+            if (!ticketData) {
+                return interaction.editReply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket válido que esté gestionado por el bot.', ephemeral: true });
             }
 
-            // Asegurarse de que el usuario tiene permisos para cerrar (soporte o creador del ticket)
-            const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId)); // CAMBIO: Comprueba si tiene ALGUNO de los roles
-            const isTicketCreator = channel.topic === `Ticket de ${member.id}`;
+            // Verificar si el usuario tiene permiso para cerrar (creador del ticket o rol de soporte)
+            const isCreator = ticketData.creatorId === member.id;
+            const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId));
 
-            if (!isSupport && !isTicketCreator) {
-                return interaction.reply({ content: '❌ Solo el creador del ticket o un miembro del equipo de soporte puede cerrar este ticket.', ephemeral: true });
+            if (!isCreator && !isSupport) {
+                return interaction.editReply({ content: '❌ No tienes permiso para cerrar este ticket. Solo el creador del ticket o un miembro del equipo de soporte pueden hacerlo.', ephemeral: true });
             }
-
-            await interaction.deferReply();
 
             try {
-                const logChannel = guild.channels.cache.get(ticketLogChannelId);
-                const ticketNumberMatch = channel.name.match(/ticket-(\d+)-/);
-                const ticketNumber = ticketNumberMatch ? ticketNumberMatch[1] : 'N/A';
-
-                const closeEmbed = new EmbedBuilder()
-                    .setColor('Red')
-                    .setTitle(`Ticket #${ticketNumber} Cerrado`)
-                    .setDescription(`**Cerrado por:** ${member.user.tag}\n**Razón:** ${reason}`)
-                    .setTimestamp();
-
-                if (logChannel) {
-                    await logChannel.send({ embeds: [closeEmbed] });
-                    // Aquí podrías adjuntar la transcripción si la generas
-                }
-
+                // Enviar log antes de borrar el canal
                 logModerationAction(
                     guild,
                     'TICKET_CLOSE',
-                    member.user, // O el usuario que inició el ticket si quieres que el log sea sobre él
-                    member.user, // Moderador que cerró
-                    `Ticket #${ticketNumber} cerrado`,
-                    `Canal: ${channel.name}\nRazón: ${reason} (comando)`
+                    await client.users.fetch(ticketData.creatorId), // Usuario que creó el ticket
+                    member, // Usuario que cierra el ticket
+                    reason,
+                    `Ticket: #${channel.name} (ID: ${channel.id})`
                 );
 
-                await channel.delete('Ticket cerrado.');
-                await interaction.followUp({ content: `✅ Ticket #${ticketNumber} cerrado con éxito.`, ephemeral: true });
+                await interaction.editReply({ content: '🔒 Cerrando el ticket en 5 segundos...', ephemeral: true });
+
+                // Eliminar el ticket de la persistencia
+                client.removeActiveTicket(guildId, channel.id);
+
+
+                setTimeout(async () => {
+                    await channel.delete(`Ticket cerrado por ${member.user.tag}: ${reason}`);
+                }, 5000); // 5 segundos de retraso para que el mensaje de log se envíe
 
             } catch (error) {
-                console.error('Error al cerrar ticket:', error);
-                await interaction.followUp({ content: '❌ Hubo un error al cerrar el ticket. Asegúrate de que el bot tenga los permisos para gestionar canales.', ephemeral: true });
+                console.error('Error al cerrar el ticket:', error);
+                await interaction.editReply({ content: '❌ Hubo un error al cerrar el ticket. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
             }
         } else if (subcommand === 'add') {
             const userToAdd = interaction.options.getUser('usuario');
-            if (channel.parentId !== ticketCategoryId) {
-                return interaction.reply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket.', ephemeral: true });
+            await interaction.deferReply({ ephemeral: true });
+
+            const activeTickets = client.getActiveTicket(guildId);
+            const ticketData = activeTickets[channel.id];
+
+            if (!ticketData) {
+                return interaction.editReply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket válido que esté gestionado por el bot.', ephemeral: true });
             }
-            const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId)); // CAMBIO: Comprueba si tiene ALGUNO de los roles
+
+            const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId));
             if (!isSupport) {
-                return interaction.reply({ content: '❌ Solo un miembro del equipo de soporte puede añadir usuarios a un ticket.', ephemeral: true });
+                return interaction.editReply({ content: '❌ Solo un miembro del equipo de soporte puede añadir usuarios a un ticket.', ephemeral: true });
+            }
+            if (channel.members.has(userToAdd.id)) {
+                return interaction.editReply({ content: `❌ ${userToAdd.tag} ya está en este ticket.`, ephemeral: true });
             }
             try {
                 await channel.permissionOverwrites.edit(userToAdd.id, {
                     ViewChannel: true,
                     SendMessages: true,
-                    ReadMessageHistory: true
+                    ReadMessageHistory: true,
                 });
-                await interaction.reply({ content: `✅ ${userToAdd.tag} ha sido añadido a este ticket.`, ephemeral: false });
+                await interaction.editReply({ content: `✅ ${userToAdd.tag} ha sido añadido a este ticket.`, ephemeral: false });
             } catch (error) {
                 console.error('Error al añadir usuario al ticket:', error);
-                await interaction.reply({ content: '❌ Hubo un error al añadir al usuario. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
+                await interaction.editReply({ content: '❌ Hubo un error al añadir al usuario. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
             }
         } else if (subcommand === 'remove') {
             const userToRemove = interaction.options.getUser('usuario');
-            if (channel.parentId !== ticketCategoryId) {
-                return interaction.reply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket.', ephemeral: true });
+            await interaction.deferReply({ ephemeral: true });
+
+            const activeTickets = client.getActiveTicket(guildId);
+            const ticketData = activeTickets[channel.id];
+
+            if (!ticketData) {
+                return interaction.editReply({ content: '❌ Este comando solo puede usarse dentro de un canal de ticket válido que esté gestionado por el bot.', ephemeral: true });
             }
+
             const isSupport = supportRoleIds.some(roleId => member.roles.cache.has(roleId)); // CAMBIO: Comprueba si tiene ALGUNO de los roles
             if (!isSupport) {
-                return interaction.reply({ content: '❌ Solo un miembro del equipo de soporte puede eliminar usuarios de un ticket.', ephemeral: true });
+                return interaction.editReply({ content: '❌ Solo un miembro del equipo de soporte puede eliminar usuarios de un ticket.', ephemeral: true });
             }
             if (userToRemove.id === member.id) {
-                return interaction.reply({ content: '❌ No puedes eliminarte a ti mismo del ticket con este comando.', ephemeral: true });
+                return interaction.editReply({ content: '❌ No puedes eliminarte a ti mismo del ticket con este comando.', ephemeral: true });
             }
             try {
                 await channel.permissionOverwrites.delete(userToRemove.id);
-                await interaction.reply({ content: `✅ ${userToRemove.tag} ha sido eliminado de este ticket.`, ephemeral: false });
+                await interaction.editReply({ content: `✅ ${userToRemove.tag} ha sido eliminado de este ticket.`, ephemeral: false });
             } catch (error) {
                 console.error('Error al eliminar usuario del ticket:', error);
-                await interaction.reply({ content: '❌ Hubo un error al eliminar al usuario. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
+                await interaction.editReply({ content: '❌ Hubo un error al eliminar al usuario. Asegúrate de que el bot tenga los permisos necesarios.', ephemeral: true });
             }
         }
     },
